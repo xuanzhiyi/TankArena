@@ -1,0 +1,14 @@
+{
+  "name": "@tank-arena/server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@colyseus/schema": "^2.0.36",
+    "@tank-arena/shared": "*",
+    "colyseus": "^0.15.21"
+  }
+}

@@ -1,0 +1,92 @@
+import { TANK_MAX_HP, TURBO_MULTIPLIER } from '@tank-arena/shared';
+
+// Mirrors server Physics.applyMovement for client-side prediction
+function applyMovementClient(ghost, input, dt) {
+  if (!ghost || !input) return;
+  let dx = 0, dy = 0;
+  if (input.w) dy -= 1;
+  if (input.s) dy += 1;
+  if (input.a) dx -= 1;
+  if (input.d) dx += 1;
+  if (dx !== 0 || dy !== 0) {
+    const len = Math.hypot(dx, dy);
+    dx /= len; dy /= len;
+    ghost.angle = Math.atan2(dy, dx);
+    const speed = ghost.speed * (input.turbo ? TURBO_MULTIPLIER : 1);
+    ghost.x += dx * speed * dt;
+    ghost.y += dy * speed * dt;
+  }
+  ghost.turretAngle = input.turretAngle ?? ghost.turretAngle;
+}
+
+export class GameEngine {
+  constructor(renderer, inputHandler, room) {
+    this.renderer = renderer;
+    this.input = inputHandler;
+    this.room = room;
+    // Local prediction ghost — mirrors own tank with immediate response
+    this.localGhost = null;
+    this._lastTime = null;
+    this._rafId = null;
+  }
+
+  start() {
+    // Initialize ghost from current server state
+    const serverTank = this.room.state.tanks.get(this.room.sessionId);
+    if (serverTank) {
+      this.localGhost = {
+        x: serverTank.x,
+        y: serverTank.y,
+        angle: serverTank.angle,
+        turretAngle: serverTank.turretAngle,
+        speed: serverTank.speed,
+      };
+    }
+    this._rafId = requestAnimationFrame(t => this._loop(t));
+  }
+
+  _loop(timestamp) {
+    const dt = this._lastTime ? Math.min((timestamp - this._lastTime) / 1000, 0.05) : 0;
+    this._lastTime = timestamp;
+
+    // 1. Get input using current local tank screen position
+    const tankScreenPos = this.renderer.getTankScreenPos(this.room.sessionId);
+    const packet = this.input.getInputPacket(tankScreenPos);
+
+    // 2. Client-side prediction
+    if (!this.localGhost) {
+      const st = this.room.state.tanks.get(this.room.sessionId);
+      if (st) this.localGhost = { x: st.x, y: st.y, angle: st.angle, turretAngle: st.turretAngle, speed: st.speed };
+    }
+    if (this.localGhost) {
+      applyMovementClient(this.localGhost, packet, dt);
+    }
+
+    // 3. Send input to server (natural ~60Hz via rAF)
+    this.room.send('input', packet);
+
+    // 4. Reconcile: if ghost diverges too far from server, snap back
+    const serverTank = this.room.state.tanks.get(this.room.sessionId);
+    if (serverTank && this.localGhost) {
+      const err = Math.hypot(serverTank.x - this.localGhost.x, serverTank.y - this.localGhost.y);
+      if (err > 1.5) {
+        this.localGhost.x = serverTank.x;
+        this.localGhost.y = serverTank.y;
+      }
+      // Always sync speed from server (might change with turbo state)
+      this.localGhost.speed = serverTank.speed;
+    }
+
+    // 5. Render
+    this.renderer.render(this.room.state, this.localGhost, this.room.sessionId);
+
+    this._rafId = requestAnimationFrame(t => this._loop(t));
+  }
+
+  stop() {
+    if (this._rafId) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
+  }
+}
