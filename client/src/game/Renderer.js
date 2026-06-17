@@ -1,22 +1,23 @@
 import * as PIXI from 'pixi.js';
 import { OVAL_MAP, TILE_W } from '@tank-arena/shared';
-import { worldToScreen, tileToScreen, getTileH, setTileH } from './isometric/IsoUtils.js';
+import { worldToScreen, tileToScreen, getTileH, setTileH, getAzimuth, setAzimuth } from './isometric/IsoUtils.js';
 import { createTankSprite } from './entities/Tank.js';
 import { createBulletSprite } from './entities/Bullet.js';
 
 const ZOOM = 3.0;
 
-const ANGLE_MIN  = 5;
-const ANGLE_MAX  = 50;
-const ANGLE_RATE = 25; // degrees per second while key is held
+const ANGLE_MIN          = 5;
+const ANGLE_MAX          = 50;
+const ANGLE_RATE         = 25;   // elevation degrees per second
+const AZIMUTH_RATE       = 1.05; // orbit radians per second (~60°/s)
 const SCROLL_SENSITIVITY = 0.05; // degrees per pixel of scroll delta
 
 const TANK_L = 0.38;
 const TANK_W = 0.22;
-const VEHICLE_ELEV = 8;  // screen px — prism height
+const VEHICLE_ELEV = 8;
 
 const DOME_R    = 0.22;
-const DOME_ELEV = 14;
+const DOME_ELEV = 18; // increased turret altitude
 
 // ---------- drawing helpers ----------
 
@@ -63,10 +64,8 @@ function drawIsoVehicle(g, angle) {
   const tip = proj(TANK_L * 1.55 * cos, TANK_L * 1.55 * sin);
 
   const E = VEHICLE_ELEV;
-  // Ground-level (dark) — visible below the raised top creates the prism side faces
   const gBody = [fl, fr, br, bl].flatMap(p => p);
   const gNose = [fl, fr, tip].flatMap(p => p);
-  // Elevated top face
   const tBody = [fl, fr, br, bl].flatMap(([x, y]) => [x, y - E]);
   const tNose = [fl, fr, tip].flatMap(([x, y]) => [x, y - E]);
 
@@ -77,30 +76,34 @@ function drawIsoVehicle(g, angle) {
   g.poly(tNose).fill({ color: g._outlineColor });
 }
 
-// ---------- tile helpers ----------
-
-function _tileShape(H) {
-  return [TILE_W / 2, 0, TILE_W, H / 2, TILE_W / 2, H, 0, H / 2];
+function _tileCornerShape() {
+  const { sx: ax, sy: ay } = worldToScreen(1, 0);
+  const { sx: bx, sy: by } = worldToScreen(1, 1);
+  const { sx: cx, sy: cy } = worldToScreen(0, 1);
+  return [0, 0, ax, ay, bx, by, cx, cy];
 }
 
 // ---------- Renderer ----------
 
 export class Renderer {
   constructor(container) {
-    this.container = container;
-    this.app = null;
-    this.tankSprites = new Map();
+    this.container     = container;
+    this.app           = null;
+    this.tankSprites   = new Map();
     this.bulletSprites = new Map();
-    this.worldContainer = null;
-    this.mapContainer = null;
+    this.worldContainer  = null;
+    this.mapContainer    = null;
     this.entityContainer = null;
-    this._ready = false;
-    this._angleDeg = ANGLE_MIN;
-    this._arrowUp   = false;
-    this._arrowDown = false;
-    this._tileGraphics = []; // store refs for in-place angle updates
-    this._onAngleKey   = this._onAngleKey.bind(this);
-    this._onScroll     = this._onScroll.bind(this);
+    this._ready      = false;
+    this._angleDeg   = ANGLE_MIN;
+    this._arrowUp    = false;
+    this._arrowDown  = false;
+    this._arrowLeft  = false;
+    this._arrowRight = false;
+    this._tileGraphics = [];
+    this._angleDirty  = false;
+    this._onCameraKey = this._onCameraKey.bind(this);
+    this._onScroll    = this._onScroll.bind(this);
     this._init();
   }
 
@@ -113,7 +116,7 @@ export class Renderer {
     });
     this.container.appendChild(this.app.canvas);
 
-    this.worldContainer = new PIXI.Container();
+    this.worldContainer  = new PIXI.Container();
     this.worldContainer.scale.set(ZOOM);
     this.app.stage.addChild(this.worldContainer);
 
@@ -125,54 +128,63 @@ export class Renderer {
     this._buildMap();
     this._ready = true;
 
-    window.addEventListener('keydown', this._onAngleKey);
-    window.addEventListener('keyup',   this._onAngleKey);
+    window.addEventListener('keydown', this._onCameraKey);
+    window.addEventListener('keyup',   this._onCameraKey);
     window.addEventListener('wheel',   this._onScroll, { passive: false });
 
-    this._angleDirty = false;
-
-    // Smooth angle update: runs every frame; handles held arrow keys and scroll dirty flag.
     this.app.ticker.add((ticker) => {
-      let changed = this._angleDirty;
+      let angleChanged = this._angleDirty;
       this._angleDirty = false;
-      const delta = ticker.deltaMS / 1000;
-      if (this._arrowUp)   { this._angleDeg = Math.min(ANGLE_MAX, this._angleDeg + ANGLE_RATE * delta); changed = true; }
-      if (this._arrowDown) { this._angleDeg = Math.max(ANGLE_MIN, this._angleDeg - ANGLE_RATE * delta); changed = true; }
-      if (!changed) return;
-      setTileH(TILE_W * Math.tan(this._angleDeg * Math.PI / 180));
-      this._updateMapAngle();
+      let viewChanged  = false;
+      const dt = ticker.deltaMS / 1000;
+
+      if (this._arrowUp)   { this._angleDeg = Math.min(ANGLE_MAX, this._angleDeg + ANGLE_RATE * dt); angleChanged = true; }
+      if (this._arrowDown) { this._angleDeg = Math.max(ANGLE_MIN, this._angleDeg - ANGLE_RATE * dt); angleChanged = true; }
+      if (this._arrowLeft)  { setAzimuth(getAzimuth() + AZIMUTH_RATE * dt); viewChanged = true; }
+      if (this._arrowRight) { setAzimuth(getAzimuth() - AZIMUTH_RATE * dt); viewChanged = true; }
+
+      // setTileH and the map redraw happen here — never in the event handler —
+      // so tiles, entities and camera all read the same angle on the same frame.
+      if (angleChanged) {
+        setTileH(TILE_W * Math.tan(this._angleDeg * Math.PI / 180));
+        viewChanged = true;
+      }
+      if (viewChanged) this._updateMapView();
     });
   }
 
   _onScroll(e) {
     e.preventDefault();
-    // scroll up (deltaY < 0) → increase angle, scroll down → decrease
+    // Only update the target angle — setTileH + redraw happen in the ticker
+    // so tiles and entities always update together on the same frame.
     this._angleDeg = Math.min(ANGLE_MAX, Math.max(ANGLE_MIN,
       this._angleDeg - e.deltaY * SCROLL_SENSITIVITY));
-    this._angleDirty = true; // actual redraw deferred to next ticker frame
+    this._angleDirty = true;
   }
 
-  _onAngleKey(e) {
-    if (e.code !== 'ArrowUp' && e.code !== 'ArrowDown') return;
-    e.preventDefault();
+  _onCameraKey(e) {
     const down = e.type === 'keydown';
-    if (e.code === 'ArrowUp')   this._arrowUp   = down;
-    if (e.code === 'ArrowDown') this._arrowDown = down;
+    switch (e.code) {
+      case 'ArrowUp':    e.preventDefault(); this._arrowUp    = down; break;
+      case 'ArrowDown':  e.preventDefault(); this._arrowDown  = down; break;
+      case 'ArrowLeft':  e.preventDefault(); this._arrowLeft  = down; break;
+      case 'ArrowRight': e.preventDefault(); this._arrowRight = down; break;
+    }
   }
 
   _buildMap() {
     this._tileGraphics = [];
+    const shape = _tileCornerShape();
     OVAL_MAP.forEach((row, r) => {
       row.forEach((tile, c) => {
         if (!tile) return;
         const { sx, sy } = tileToScreen(c, r);
         const g = new PIXI.Graphics();
-        g._tileCol = c;
-        g._tileRow = r;
+        g._tileCol     = c;
+        g._tileRow     = r;
         g._fillColor   = tile === 2 ? 0x1b4332 : 0x2d6a4f;
         g._borderColor = tile === 2 ? 0x40916c : 0x52b788;
-        const H = getTileH();
-        g.poly(_tileShape(H)).fill({ color: g._fillColor })
+        g.poly(shape).fill({ color: g._fillColor })
          .stroke({ color: g._borderColor, width: 0.5, alpha: 0.5 });
         g.x = sx;
         g.y = sy;
@@ -182,10 +194,8 @@ export class Renderer {
     });
   }
 
-  // Update tile positions and shapes in-place (no destroy) for smooth angle changes.
-  _updateMapAngle() {
-    const H = getTileH();
-    const shape = _tileShape(H);
+  _updateMapView() {
+    const shape = _tileCornerShape();
     for (const g of this._tileGraphics) {
       const { sx, sy } = tileToScreen(g._tileCol, g._tileRow);
       g.clear();
@@ -196,9 +206,9 @@ export class Renderer {
     }
   }
 
-  _updateCamera(localTankWx, localTankWy) {
+  _updateCamera(wx, wy) {
     const H = getTileH();
-    const { sx, sy } = worldToScreen(localTankWx, localTankWy);
+    const { sx, sy } = worldToScreen(wx, wy);
     this.worldContainer.x = this.app.screen.width  / 2 - (sx + TILE_W / 2) * ZOOM;
     this.worldContainer.y = this.app.screen.height / 2 - (sy + H / 2) * ZOOM;
   }
@@ -290,8 +300,8 @@ export class Renderer {
   }
 
   destroy() {
-    window.removeEventListener('keydown', this._onAngleKey);
-    window.removeEventListener('keyup',   this._onAngleKey);
+    window.removeEventListener('keydown', this._onCameraKey);
+    window.removeEventListener('keyup',   this._onCameraKey);
     window.removeEventListener('wheel',   this._onScroll);
     if (this.app) this.app.destroy(true);
   }
