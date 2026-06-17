@@ -7,8 +7,9 @@ import { createBulletSprite } from './entities/Bullet.js';
 const ZOOM = 3.0;
 
 const ANGLE_MIN  = 5;
-const ANGLE_MAX  = 45;
+const ANGLE_MAX  = 50;
 const ANGLE_RATE = 25; // degrees per second while key is held
+const SCROLL_SENSITIVITY = 0.05; // degrees per pixel of scroll delta
 
 const TANK_L = 0.38;
 const TANK_W = 0.22;
@@ -98,7 +99,8 @@ export class Renderer {
     this._arrowUp   = false;
     this._arrowDown = false;
     this._tileGraphics = []; // store refs for in-place angle updates
-    this._onAngleKey = this._onAngleKey.bind(this);
+    this._onAngleKey   = this._onAngleKey.bind(this);
+    this._onScroll     = this._onScroll.bind(this);
     this._init();
   }
 
@@ -125,16 +127,29 @@ export class Renderer {
 
     window.addEventListener('keydown', this._onAngleKey);
     window.addEventListener('keyup',   this._onAngleKey);
+    window.addEventListener('wheel',   this._onScroll, { passive: false });
 
-    // Smooth angle update: runs every frame while arrow keys are held
+    this._angleDirty = false;
+
+    // Smooth angle update: runs every frame; handles held arrow keys and scroll dirty flag.
     this.app.ticker.add((ticker) => {
-      if (!this._arrowUp && !this._arrowDown) return;
+      let changed = this._angleDirty;
+      this._angleDirty = false;
       const delta = ticker.deltaMS / 1000;
-      if (this._arrowUp)   this._angleDeg = Math.min(ANGLE_MAX, this._angleDeg + ANGLE_RATE * delta);
-      if (this._arrowDown) this._angleDeg = Math.max(ANGLE_MIN, this._angleDeg - ANGLE_RATE * delta);
+      if (this._arrowUp)   { this._angleDeg = Math.min(ANGLE_MAX, this._angleDeg + ANGLE_RATE * delta); changed = true; }
+      if (this._arrowDown) { this._angleDeg = Math.max(ANGLE_MIN, this._angleDeg - ANGLE_RATE * delta); changed = true; }
+      if (!changed) return;
       setTileH(TILE_W * Math.tan(this._angleDeg * Math.PI / 180));
       this._updateMapAngle();
     });
+  }
+
+  _onScroll(e) {
+    e.preventDefault();
+    // scroll up (deltaY < 0) → increase angle, scroll down → decrease
+    this._angleDeg = Math.min(ANGLE_MAX, Math.max(ANGLE_MIN,
+      this._angleDeg - e.deltaY * SCROLL_SENSITIVITY));
+    this._angleDirty = true; // actual redraw deferred to next ticker frame
   }
 
   _onAngleKey(e) {
@@ -277,6 +292,7 @@ export class Renderer {
   destroy() {
     window.removeEventListener('keydown', this._onAngleKey);
     window.removeEventListener('keyup',   this._onAngleKey);
+    window.removeEventListener('wheel',   this._onScroll);
     if (this.app) this.app.destroy(true);
   }
 }
