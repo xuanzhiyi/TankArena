@@ -21,10 +21,10 @@ export class InputHandler {
   _onKey(e) {
     const down = e.type === 'keydown';
     switch (e.code) {
-      case 'KeyW': case 'ArrowUp':    this.keys.w = down; break;
-      case 'KeyA': case 'ArrowLeft':  this.keys.a = down; break;
-      case 'KeyS': case 'ArrowDown':  this.keys.s = down; break;
-      case 'KeyD': case 'ArrowRight': this.keys.d = down; break;
+      case 'KeyW': this.keys.w = down; break;
+      case 'KeyA': this.keys.a = down; break;
+      case 'KeyS': this.keys.s = down; break;
+      case 'KeyD': this.keys.d = down; break;
       case 'KeyQ': this.keys.q = down; break;
       case 'KeyE': this.keys.e = down; break;
     }

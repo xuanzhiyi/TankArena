@@ -3,7 +3,7 @@ export const TICK_RATE = 60;
 export const MAP_COLS = 20;
 export const MAP_ROWS = 15;
 export const TILE_W = 128;
-export const TILE_H = 64;
+export const TILE_H = 11;
 
 export const TANK_RADIUS = 0.6;
 export const BULLET_SPEED = 8;

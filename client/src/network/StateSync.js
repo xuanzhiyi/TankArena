@@ -12,7 +12,7 @@ export class StateSync {
     });
 
     room.state.bullets.onAdd((bullet, bulletId) => {
-      renderer.addBullet(bulletId, bullet);
+      renderer.addBullet(bulletId);
     });
 
     room.state.bullets.onRemove((bullet, bulletId) => {
