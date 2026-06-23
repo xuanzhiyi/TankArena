@@ -1,4 +1,32 @@
-import { TANK_MAX_HP, TURBO_MULTIPLIER } from '@tank-arena/shared';
+import { TANK_MAX_HP, TURBO_MULTIPLIER, OVAL_MAP, MAP_COLS, MAP_ROWS } from '@tank-arena/shared';
+
+function isWalkable(wx, wy) {
+  const col = Math.floor(wx);
+  const row = Math.floor(wy);
+  if (col < 0 || col >= MAP_COLS || row < 0 || row >= MAP_ROWS) return false;
+  return OVAL_MAP[row][col] !== 0;
+}
+
+function debugBoundaries() {
+  console.log('=== VISUAL TILES (rendered, OVAL_MAP !== 0) ===');
+  for (let r = 0; r < MAP_ROWS; r++) {
+    let minC = -1, maxC = -1;
+    for (let c = 0; c < MAP_COLS; c++) {
+      if (OVAL_MAP[r][c] !== 0) { if (minC === -1) minC = c; maxC = c; }
+    }
+    if (minC !== -1) console.log(`  row ${r}: col ${minC}–${maxC}  (world x ${minC}–${maxC + 1})`);
+  }
+
+  console.log('=== WALKABLE BOUNDARY (isWalkable edges) ===');
+  for (let r = 0; r < MAP_ROWS; r++) {
+    let minW = -1, maxW = -1;
+    for (let c = 0; c < MAP_COLS; c++) {
+      if (isWalkable(c + 0.5, r + 0.5)) { if (minW === -1) minW = c; maxW = c; }
+    }
+    if (minW !== -1) console.log(`  row ${r}: col ${minW}–${maxW}  (world x ${minW}–${maxW + 1})`);
+  }
+}
+debugBoundaries();
 
 // Mirrors server Physics.applyMovement for client-side prediction
 function applyMovementClient(ghost, input, dt) {
@@ -13,8 +41,10 @@ function applyMovementClient(ghost, input, dt) {
     dx /= len; dy /= len;
     ghost.angle = Math.atan2(dy, dx);
     const speed = ghost.speed * (input.turbo ? TURBO_MULTIPLIER : 1);
-    ghost.x += dx * speed * dt;
-    ghost.y += dy * speed * dt;
+    const nx = ghost.x + dx * speed * dt;
+    const ny = ghost.y + dy * speed * dt;
+    if (isWalkable(nx, ghost.y)) ghost.x = nx;
+    if (isWalkable(ghost.x, ny)) ghost.y = ny;
   }
   ghost.turretAngle = input.turretAngle ?? ghost.turretAngle;
 }
@@ -79,6 +109,13 @@ export class GameEngine {
 
     // 5. Render
     this.renderer.render(this.room.state, this.localGhost, this.room.sessionId);
+
+    // DEBUG: print tank world coordinates
+    if (this.localGhost) {
+      const x = this.localGhost.x.toFixed(2);
+      const y = this.localGhost.y.toFixed(2);
+      document.title = `x=${x} y=${y}`;
+    }
 
     this._rafId = requestAnimationFrame(t => this._loop(t));
   }

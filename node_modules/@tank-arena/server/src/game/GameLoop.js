@@ -98,8 +98,10 @@ export class GameLoop {
     b.id = id;
     b.ownerId = ownerId;
     b.ownerTeam = tank.team;
-    b.x = tank.x;
-    b.y = tank.y;
+    // Spawn at cannon tip so bullet visually exits the barrel
+    const CANNON_LENGTH = 0.5; // world units — matches client CL (0.44) + a small gap
+    b.x = tank.x + Math.cos(tank.turretAngle) * CANNON_LENGTH;
+    b.y = tank.y + Math.sin(tank.turretAngle) * CANNON_LENGTH;
     b.angle = tank.turretAngle;
     b.lifetime = BULLET_LIFETIME;
     b.damage = def.bulletDamage;

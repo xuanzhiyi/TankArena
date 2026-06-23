@@ -6,8 +6,8 @@ import { createBulletSprite } from './entities/Bullet.js';
 
 const ZOOM = 3.0;
 
-const ANGLE_MIN          = 5;
-const ANGLE_MAX          = 50;
+const ANGLE_MIN          = 0;
+const ANGLE_MAX          = 45;
 const ANGLE_RATE         = 25;   // elevation degrees per second
 const AZIMUTH_RATE       = 1.05; // orbit radians per second (~60°/s)
 const SCROLL_SENSITIVITY = 0.05; // degrees per pixel of scroll delta
@@ -48,7 +48,6 @@ function drawIsoTurret(g, angle) {
   g.clear();
   g.poly([cbl0, cbl1, cbr0, cbr1, cbr0, cbr1 - E, cbl0, cbl1 - E]).fill({ color: 0x0d0d1a });
   g.poly([cbl0, cbl1 - E, cbr0, cbr1 - E, ctr0, ctr1 - E, ctl0, ctl1 - E]).fill({ color: 0x1a1a2e });
-  g.poly(_isoSquare(DOME_R * 1.08, angle, E * 0.6)).fill({ color: 0x0d0d1a });
   g.poly(_isoSquare(DOME_R, angle, -E)).fill({ color: 0x3d405b });
 }
 
@@ -277,12 +276,13 @@ export class Renderer {
       sprite.x = sx + TILE_W / 2;
       sprite.y = sy + H / 2;
 
+      const az = getAzimuth();
       const angle = useLocal ? localTank.angle : tank.angle;
       const vehicleChild = sprite.getChildByLabel('vehicle');
-      if (vehicleChild) drawIsoVehicle(vehicleChild, angle);
+      if (vehicleChild) drawIsoVehicle(vehicleChild, angle + az);
 
       const turretChild = sprite.getChildByLabel('turret');
-      if (turretChild) drawIsoTurret(turretChild, tank.turretAngle);
+      if (turretChild) drawIsoTurret(turretChild, tank.turretAngle + az);
 
       const shieldChild = sprite.getChildByLabel('shield');
       if (shieldChild) shieldChild.visible = tank.shieldActive;
@@ -294,8 +294,8 @@ export class Renderer {
       const sprite = this.bulletSprites.get(bid);
       if (!sprite) return;
       const { sx, sy } = worldToScreen(bullet.x, bullet.y);
-      sprite.x = sx;
-      sprite.y = sy;
+      sprite.x = sx + TILE_W / 2;
+      sprite.y = sy + H / 2;
     });
   }
 

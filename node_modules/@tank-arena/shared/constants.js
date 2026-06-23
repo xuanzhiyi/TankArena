@@ -1,7 +1,7 @@
 export const TICK_RATE = 60;
 
-export const MAP_COLS = 20;
-export const MAP_ROWS = 15;
+export const MAP_COLS = 35;
+export const MAP_ROWS = 35;
 export const TILE_W = 128;
 export const TILE_H = 11;
 
